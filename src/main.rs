@@ -87,6 +87,11 @@ fn main() {
     let manta_url = env::var("MANTA_URL")
         .expect("MANTA_URL not set");
 
+    assert!(!ssh_auth_sock.is_empty());
+    assert!(!manta_key_id.is_empty());
+    assert!(!manta_user.is_empty());
+    assert!(!manta_url.is_empty());
+
     let args: Vec<String> = env::args().collect();
     let args = &args[1..]; // chop off 1st arg (program name)
     let mut loc = match args.len() {
