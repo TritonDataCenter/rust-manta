@@ -88,11 +88,16 @@ fn main() {
         .expect("MANTA_URL not set");
 
     let args: Vec<String> = env::args().collect();
-    let args = &args[1..];
-    let loc = match args.len() {
+    let args = &args[1..]; // chop off 1st arg (program name)
+    let mut loc = match args.len() {
         0 => format!("/{}/stor", manta_user),
         _ => args[0].clone(),
     };
+    if loc.starts_with("~~/") {
+        loc = format!("/{}/{}", manta_user, &loc[3..]);
+    }
+    assert!(loc.starts_with('/'));
+
     println!("{:?}", loc);
 
     println!("ssh_auth_sock = {}", ssh_auth_sock);
