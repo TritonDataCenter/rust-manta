@@ -6,6 +6,7 @@ extern crate serde_json;
 extern crate sha2;
 
 use std::env;
+use std::fmt;
 use std::time::Duration;
 use std::io::prelude::*;
 use std::os::unix::net::UnixStream;
@@ -13,6 +14,43 @@ use std::os::unix::net::UnixStream;
 use chrono::prelude::*;
 use serde_json::Value;
 use sha2::Digest;
+
+struct SshIdentity {
+    key: String,
+    key_type: String,
+    comment: String,
+    md5_fp: String,
+    sha256_fp: String,
+    raw_key: Vec<u8>,
+}
+
+impl SshIdentity {
+    fn new(bytes: &[u8], comment: String) -> SshIdentity {
+        // The type of the key is held in the key itself.. extract it here
+        let type_len = read_u32be(&bytes, 0) as usize;
+        let t = read_string(&bytes, 4, type_len);
+
+        // generatefinger prints
+        let md5_fp = md5_fingerprint(&bytes);
+        let sha256_fp = sha256_fingerprint(&bytes);
+
+        SshIdentity {
+            raw_key: bytes.to_vec(),
+            key: base64::encode(&bytes),
+            key_type: t,
+            comment: comment,
+            md5_fp: md5_fp,
+            sha256_fp: sha256_fp,
+        }
+    }
+}
+
+impl fmt::Display for SshIdentity {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "SshIdentity: {} {} {}",
+           self.key_type, self.sha256_fp, self.comment)
+    }
+}
 
 fn read_u32be(buf: &[u8], offset: usize) -> u32 {
     ((buf[offset + 0] as u32) << 24) +
@@ -161,14 +199,6 @@ fn main() {
 
         // Extract the bytes for the key
         let bytes = &buf[idx..(idx + len)];
-
-        // The key itself should be base64 encoded
-        let _hex = base64::encode(&bytes);
-
-        // The type of the key is held in the key itself.. extract it here
-        let type_len = read_u32be(&bytes, 0) as usize;
-        let t = read_string(&bytes, 4, type_len);
-
         idx = idx + len;
 
         // Read the comment
@@ -177,25 +207,13 @@ fn main() {
         let comment = read_string(&buf, idx, len);
         idx = idx + len;
 
-        // sha256 fingerprint
-        let sha256_fp = sha256_fingerprint(&bytes);
+        // Make a new SshIdentity
+        let ident = SshIdentity::new(bytes, comment);
+        println!("{}", ident);
 
-        // md5 fingerprint
-        let _md5_fp = md5_fingerprint(&bytes);
-
-        /*
-        println!("type = {}", t);
-        println!("key = {}", _hex);
-        println!("comment = {}", comment);
-        println!("sha256_fp = {}", sha256_fp);
-        println!("md5_fp = {}", md5_fp);
-        println!();
-        */
-        println!("{} {} {}", t, sha256_fp, comment);
-
-        if _md5_fp == manta_key_id || sha256_fp == manta_key_id {
+        if ident.md5_fp == manta_key_id || ident.sha256_fp == manta_key_id {
             key = bytes.clone().to_vec();
-            md5_fp = _md5_fp.clone();
+            md5_fp = ident.md5_fp.clone();
             key_found = true;
         }
     }
