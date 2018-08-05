@@ -27,7 +27,7 @@ fn read_u8(buf: &[u8], offset: usize) -> u8 {
 
 fn write_bytes(buf: &mut Vec<u8>, bytes: &[u8], offset: usize) {
     for i in 0..bytes.len() {
-        buf[i + offset] = bytes[i]
+        buf[i + offset] = bytes[i];
     }
 }
 
