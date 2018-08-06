@@ -16,12 +16,13 @@ use serde_json::Value;
 use sha2::Digest;
 
 struct SshIdentity {
-    key: String,
     key_type: String,
     comment: String,
     md5_fp: String,
     sha256_fp: String,
     raw_key: Vec<u8>,
+    #[allow(dead_code)]
+    key: String,
 }
 
 impl SshIdentity {
@@ -49,6 +50,170 @@ impl fmt::Display for SshIdentity {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "SshIdentity: {} {} {}",
            self.key_type, self.sha256_fp, self.comment)
+    }
+}
+
+struct SshAgentClient {
+    stream: UnixStream,
+    #[allow(dead_code)]
+    socket_path: String,
+}
+
+impl SshAgentClient {
+    const SSH_AGENTC_REQUEST_RSA_IDENTITIES: u8 = 11;
+    const SSH_AGENT_IDENTITIES_ANSWER: u8 = 12;
+    const SSH2_AGENTC_SIGN_REQUEST: u8 = 13;
+    const SSH2_AGENT_SIGN_RESPONSE: u8 = 14;
+
+    fn new(socket_path: &str) -> SshAgentClient {
+        let stream = UnixStream::connect(&socket_path)
+            .expect("failed to connect to socket");
+
+        stream.set_read_timeout(Some(Duration::new(1, 0)))
+            .expect("failed to set_read_timeout");
+
+        SshAgentClient {
+            socket_path: socket_path.to_string(),
+            stream: stream
+        }
+    }
+
+    fn list_identities(&mut self) -> Vec<SshIdentity> {
+        let mut identities: Vec<SshIdentity> = Vec::new();
+
+        // write request for identities
+        let buf = [
+            0, 0, 0, 1,
+            Self::SSH_AGENTC_REQUEST_RSA_IDENTITIES
+        ];
+        let rv = self.stream.write(&buf)
+            .expect("Failed to write to socket");
+        assert!(rv == 5);
+
+        // read the response length first
+        let mut buf = vec![0; 4];
+        let rv = self.stream.read(&mut buf)
+            .expect("Failed to read from socket");
+        assert!(rv == 4);
+        let len = read_u32be(&buf, 0);
+
+        // read the rest of the resposne
+        let mut buf = vec![0; len as usize];
+        self.stream.read_exact(&mut buf)
+            .expect("Failed to read from socket");
+
+        let mut idx = 0;
+
+        // first byte should be the correct response type
+        let response_type = read_u8(&buf, idx);
+        assert!(response_type == Self::SSH_AGENT_IDENTITIES_ANSWER);
+        idx = idx + 1;
+
+        // next u32 is the number of keys in the agent
+        let num_keys = read_u32be(&buf, idx);
+        idx = idx + 4;
+
+        // loop each key found
+        for _ in 0..num_keys {
+            // Read key len
+            let len = read_u32be(&buf, idx) as usize;
+            idx = idx + 4;
+
+            // Extract the bytes for the key
+            let bytes = &buf[idx..(idx + len)];
+            idx = idx + len;
+
+            // Read the comment
+            let len = read_u32be(&buf, idx) as usize;
+            idx = idx + 4;
+            let comment = read_string(&buf, idx, len);
+            idx = idx + len;
+
+            // Make a new SshIdentity
+            let ident = SshIdentity::new(bytes, comment);
+            identities.push(ident);
+        }
+
+        identities
+    }
+
+    fn sign_data(&mut self, identity: &SshIdentity, data: &[u8]) -> String {
+        let mut idx = 0;
+        let mut buf = vec![0; 4 + 1 + 4 + identity.raw_key.len() + 4 + data.len() + 4];
+
+        let len = buf.len() - 4;
+        write_u32be(&mut buf, len as u32, idx);
+        idx = idx + 4;
+
+        write_u8(&mut buf, Self::SSH2_AGENTC_SIGN_REQUEST, idx);
+        idx = idx + 1;
+
+        write_u32be(&mut buf, identity.raw_key.len() as u32, idx);
+        idx = idx + 4;
+
+        write_bytes(&mut buf, &identity.raw_key, idx);
+        idx = idx + identity.raw_key.len();
+
+        write_u32be(&mut buf, data.len() as u32, idx);
+        idx = idx + 4;
+
+        write_bytes(&mut buf, &data, idx);
+        idx = idx + data.len();
+
+        write_u32be(&mut buf, 0, idx);
+        idx = idx + 4;
+
+        // println!("writing {:?}", buf);
+
+        let rv = self.stream.write(&buf)
+            .expect("Failed to write to socket");
+        assert!(rv == idx);
+
+        // read the response length first
+        let mut buf = vec![0; 4];
+        let rv = self.stream.read(&mut buf)
+            .expect("Failed to read from socket");
+        assert!(rv == 4);
+        let len = read_u32be(&buf, 0);
+
+        // println!("got back len = {}", len);
+
+        // read the rest of the resposne
+        let mut buf = vec![0; len as usize];
+        self.stream.read_exact(&mut buf)
+            .expect("Failed to read from socket");
+
+        // println!("got back {:?}", buf);
+
+        let mut idx = 0;
+
+        // first byte should be the correct response type
+        let response_type = read_u8(&buf, idx);
+        assert!(response_type == Self::SSH2_AGENT_SIGN_RESPONSE);
+        idx = idx + 1;
+
+        // next u32 is ???
+        let _foo = read_u32be(&buf, idx);
+        idx = idx + 4;
+
+        // read type
+        let len = read_u32be(&buf, idx) as usize;
+        idx = idx + 4;
+        let _t = read_string(&buf, idx, len);
+        idx = idx + len;
+
+        // read signed blob
+        let len = read_u32be(&buf, idx) as usize;
+        idx = idx + 4;
+        let blob = &buf[idx..(idx + len)];
+
+        base64::encode(&blob)
+    }
+}
+
+impl fmt::Display for SshAgentClient {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "SshAgentClient: {:?}", self.stream)
     }
 }
 
@@ -146,161 +311,24 @@ fn main() {
     println!("ssh_auth_sock = {}", ssh_auth_sock);
     println!("manta_key_id = {}", manta_key_id);
 
-    let mut stream = UnixStream::connect(&ssh_auth_sock)
-        .expect("failed to connect to socket");
+    let mut ssh_agent_client = SshAgentClient::new(&ssh_auth_sock);
+    let identities = ssh_agent_client.list_identities();
 
-    stream.set_read_timeout(Some(Duration::new(1, 0)))
-        .expect("failed to set_read_timeout");
+    println!("found {} ssh identities", identities.len());
+    let idx = identities.iter().position( |ref ident| {
+        ident.md5_fp == manta_key_id || ident.sha256_fp == manta_key_id
+    }).expect("Failed to find key in ssh-agent");
 
-    println!("{:?}", stream);
-
-    // write request for identities
-    let buf = [
-        0, 0, 0, 1,
-        11
-    ];
-    let rv = stream.write(&buf)
-        .expect("Failed to write to socket");
-    assert!(rv == 5);
-
-    // read the response length first
-    let mut buf = vec![0; 4];
-    let rv = stream.read(&mut buf)
-        .expect("Failed to read from socket");
-    assert!(rv == 4);
-    let len = read_u32be(&buf, 0);
-
-    // read the rest of the resposne
-    let mut buf = vec![0; len as usize];
-    stream.read_exact(&mut buf)
-        .expect("Failed to read from socket");
-
-    let mut idx = 0;
-
-    // first byte should be the correct response type
-    let response_type = read_u8(&buf, idx);
-    assert!(response_type == 12);
-    idx = idx + 1;
-
-    // next u32 is the number of keys in the agent
-    let num_keys = read_u32be(&buf, idx);
-    idx = idx + 4;
-
-    println!("-- found {} keys in ssh-agent --", num_keys);
-
-    // loop each key found
-    let mut key_found = false;
-    let mut key: Vec<u8> = Vec::new();
-    let mut md5_fp = String::new();
-    for _ in 0..num_keys {
-        // Read key len
-        let len = read_u32be(&buf, idx) as usize;
-        idx = idx + 4;
-
-        // Extract the bytes for the key
-        let bytes = &buf[idx..(idx + len)];
-        idx = idx + len;
-
-        // Read the comment
-        let len = read_u32be(&buf, idx) as usize;
-        idx = idx + 4;
-        let comment = read_string(&buf, idx, len);
-        idx = idx + len;
-
-        // Make a new SshIdentity
-        let ident = SshIdentity::new(bytes, comment);
-        println!("{}", ident);
-
-        if ident.md5_fp == manta_key_id || ident.sha256_fp == manta_key_id {
-            key = bytes.clone().to_vec();
-            md5_fp = ident.md5_fp.clone();
-            key_found = true;
-        }
-    }
-
-    if ! key_found {
-        println!("key {} not found in ssh-agent", manta_key_id);
-        std::process::exit(1);
-    }
-
-    idx = 0;
-
-    //println!("using key = {:?}", key);
+    let identity = &identities[idx];
+    println!("{}", identity);
 
     // create request for sign
     let date = rfc1123(&Utc::now());
     let date_header = format!("date: {}", date);
     let data = date_header.as_bytes();
-    let mut buf = vec![0; 4 + 1 + 4 + key.len() + 4 + data.len() + 4];
+    let signature = ssh_agent_client.sign_data(identity, data);
 
-    let len = buf.len() - 4;
-    write_u32be(&mut buf, len as u32, idx);
-    idx = idx + 4;
-
-    write_u8(&mut buf, 13, idx);
-    idx = idx + 1;
-
-    write_u32be(&mut buf, key.len() as u32, idx);
-    idx = idx + 4;
-
-    write_bytes(&mut buf, &key, idx);
-    idx = idx + key.len();
-
-    write_u32be(&mut buf, data.len() as u32, idx);
-    idx = idx + 4;
-
-    write_bytes(&mut buf, &data, idx);
-    idx = idx + data.len();
-
-    write_u32be(&mut buf, 0, idx);
-    idx = idx + 4;
-
-    // println!("writing {:?}", buf);
-
-    let rv = stream.write(&buf)
-        .expect("Failed to write to socket");
-    assert!(rv == idx);
-
-    // read the response length first
-    let mut buf = vec![0; 4];
-    let rv = stream.read(&mut buf)
-        .expect("Failed to read from socket");
-    assert!(rv == 4);
-    let len = read_u32be(&buf, 0);
-
-    // println!("got back len = {}", len);
-
-    // read the rest of the resposne
-    let mut buf = vec![0; len as usize];
-    stream.read_exact(&mut buf)
-        .expect("Failed to read from socket");
-
-    // println!("got back {:?}", buf);
-
-    let mut idx = 0;
-
-    // first byte should be the correct response type
-    let response_type = read_u8(&buf, idx);
-    assert!(response_type == 14);
-    idx = idx + 1;
-
-    // next u32 is ???
-    let _foo = read_u32be(&buf, idx);
-    idx = idx + 4;
-
-    // read type
-    let len = read_u32be(&buf, idx) as usize;
-    idx = idx + 4;
-    let _t = read_string(&buf, idx, len);
-    idx = idx + len;
-
-    // read signed blob
-    let len = read_u32be(&buf, idx) as usize;
-    idx = idx + 4;
-    let blob = &buf[idx..(idx + len)];
-    let signature = base64::encode(&blob);
-
-    let key_id = format!("/{}/keys/{}", manta_user, md5_fp);
+    let key_id = format!("/{}/keys/{}", manta_user, identity.md5_fp);
     let authorization = auth_header(key_id, "rsa-sha1".to_string(), signature);
     println!();
     println!("curl -sS --header '{}' --header 'authorization: {}' '{}{}';echo",
