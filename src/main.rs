@@ -260,7 +260,7 @@ fn sha256_fingerprint(bytes: &[u8]) -> String {
 
     let sum = hasher.result();
 
-    format!("SHA256:{}", base64::encode(&sum))
+    format!("SHA256:{}", base64::encode_config(&sum, base64::STANDARD_NO_PAD))
 }
 
 fn md5_fingerprint(bytes: &[u8]) -> String {
