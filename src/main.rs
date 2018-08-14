@@ -26,7 +26,7 @@ struct SshIdentity {
 }
 
 impl SshIdentity {
-    fn new(bytes: &[u8], comment: String) -> SshIdentity {
+    fn new(bytes: &[u8], comment: &str) -> SshIdentity {
         // The type of the key is held in the key itself.. extract it here
         let type_len = read_u32be(&bytes, 0) as usize;
         let t = read_string(&bytes, 4, type_len);
@@ -39,7 +39,7 @@ impl SshIdentity {
             raw_key: bytes.to_vec(),
             key: base64::encode(&bytes),
             key_type: t,
-            comment: comment,
+            comment: comment.to_string(),
             md5_fp: md5_fp,
             sha256_fp: sha256_fp,
         }
@@ -130,7 +130,7 @@ impl SshAgentClient {
             idx = idx + len;
 
             // Make a new SshIdentity
-            let ident = SshIdentity::new(bytes, comment);
+            let ident = SshIdentity::new(bytes, &comment);
             identities.push(ident);
         }
 
@@ -275,7 +275,7 @@ fn md5_fingerprint(bytes: &[u8]) -> String {
     strs.join(":")
 }
 
-fn auth_header(key_id: String, algorithm: String, signature: String) -> String {
+fn auth_header(key_id: &str, algorithm: &str, signature: &str) -> String {
     format!("Signature keyId=\"{}\",algorithm=\"{}\",headers=\"date\",signature=\"{}\"",
         key_id, algorithm, signature)
 }
@@ -329,7 +329,7 @@ fn main() {
     let signature = ssh_agent_client.sign_data(identity, data);
 
     let key_id = format!("/{}/keys/{}", manta_user, identity.md5_fp);
-    let authorization = auth_header(key_id, "rsa-sha1".to_string(), signature);
+    let authorization = auth_header(&key_id, "rsa-sha1", &signature);
     println!();
     println!("curl -sS --header '{}' --header 'authorization: {}' '{}{}';echo",
          date_header, authorization, manta_url, loc);
