@@ -3,6 +3,10 @@ name = "rust-manta"
 version = "0.1.0"
 authors = ["Dave Eddy <dave@daveeddy.com>"]
 
+[[bin]]
+name = "mls"
+path = "src/bin/mls.rs"
+
 [dependencies]
 # hashing/encoding
 base64 = "0.9.2"
@@ -16,3 +20,6 @@ chrono = "0.4"
 # JSON
 serde = "1.0.70"
 serde_json = "1.0"
+
+# http
+reqwest = "0.9.5"

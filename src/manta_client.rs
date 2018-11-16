@@ -5,15 +5,32 @@ extern crate md5;
 extern crate serde_json;
 extern crate sha2;
 
-use std::env;
+use std::fmt;
 
-use chrono::prelude::*;
-use serde_json::Value;
+use sha2::Digest;
 
-mod ssh_agent_client;
-mod ssh_identity;
+pub struct MantaClient {
+    pub manta_url: String,
+    pub manta_user: String,
+    pub manta_key_id: String,
+}
 
-use ssh_agent_client::SshAgentClient;
+impl MantaClient {
+    pub fn new_with_env() -> MantaClient {
+
+        SshIdentity {
+            manta_url: ,
+            manta_user: ,
+            manta_key_id: ,
+        }
+    }
+}
+
+impl fmt::Display for MantaClient {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "")
+    }
+}
 
 fn rfc1123(date: &DateTime<Utc>) -> String {
     date.format("%a, %d %b %Y %H:%M:%S GMT").to_string()
@@ -23,7 +40,6 @@ fn auth_header(key_id: &str, algorithm: &str, signature: &str) -> String {
     format!("Signature keyId=\"{}\",algorithm=\"{}\",headers=\"date\",signature=\"{}\"",
         key_id, algorithm, signature)
 }
-
 fn main() {
     let ssh_auth_sock = env::var("SSH_AUTH_SOCK")
         .expect("SSH_AUTH_SOCK not set");
@@ -74,24 +90,21 @@ fn main() {
 
     let key_id = format!("/{}/keys/{}", manta_user, identity.md5_fp);
     let authorization = auth_header(&key_id, "rsa-sha1", &signature);
-    println!();
-    println!("curl -sS --header '{}' --header 'authorization: {}' '{}{}';echo",
-         date_header, authorization, manta_url, loc);
-    println!();
 
-    // TODO find an HTTP(s) client library that works on SmartOS
-    let output = std::process::Command::new("curl")
-                                       .arg("-sS")
-                                       .arg("--header")
-                                       .arg(format!("{}", date_header))
-                                       .arg("--header")
-                                       .arg(format!("authorization: {}", authorization))
-                                       .arg(format!("{}{}", manta_url, loc))
-                                       .output()
-                                       .expect("failed to execute curl");
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let files = stdout.trim().split("\n");
+    let url = format!("{}{}", manta_url, loc);
+
+    let client = reqwest::Client::new();
+    let mut res = client.get(&url)
+        .header(reqwest::header::DATE, date)
+        .header(reqwest::header::AUTHORIZATION, authorization)
+        .send().unwrap();
+
+    assert!(res.status().is_success());
+
+    println!("headers = {:#?}", res.headers());
+
+    let body = res.text().unwrap();
+    let files = body.trim().split("\n");
 
     // Parse each blob
     for file in files {

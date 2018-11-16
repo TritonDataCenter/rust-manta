@@ -23,7 +23,7 @@ impl SshIdentity {
     pub fn new(bytes: &[u8], comment: &str) -> SshIdentity {
         // The type of the key is held in the key itself.. extract it here
         let type_len = read_u32be(&bytes, 0) as usize;
-        let t = read_string(&bytes, 4, type_len);
+        let key_type = read_string(&bytes, 4, type_len);
 
         // generatefinger prints
         let md5_fp = md5_fingerprint(&bytes);
@@ -32,7 +32,7 @@ impl SshIdentity {
         SshIdentity {
             raw_key: bytes.to_vec(),
             key: base64::encode(&bytes),
-            key_type: t,
+            key_type: key_type,
             comment: comment.to_string(),
             md5_fp: md5_fp,
             sha256_fp: sha256_fp,
@@ -46,6 +46,7 @@ impl fmt::Display for SshIdentity {
            self.key_type, self.sha256_fp, self.comment)
     }
 }
+
 fn read_string(buf: &[u8], offset: usize, len: usize) -> String {
     let slice = &buf[offset..(offset + len) as usize];
     String::from_utf8(slice.to_vec()).expect("Failed to read string")
