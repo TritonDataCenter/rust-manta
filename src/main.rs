@@ -4,8 +4,16 @@ extern crate hmac;
 extern crate md5;
 extern crate serde_json;
 extern crate sha2;
+extern crate hyper;
+extern crate hyper_tls;
+
 
 use std::env;
+
+use hyper::{Method, Client, Request};
+use hyper_tls::HttpsConnector;
+use hyper::rt::{self, Future, Stream};
+use hyper::header::{AUTHORIZATION, DATE};
 
 use chrono::prelude::*;
 use serde_json::Value;
@@ -75,29 +83,63 @@ fn main() {
     let key_id = format!("/{}/keys/{}", manta_user, identity.md5_fp);
     let authorization = auth_header(&key_id, "rsa-sha1", &signature);
     println!();
-    println!("curl -sS --header '{}' --header 'authorization: {}' '{}{}';echo",
+    println!("headers:\n'{}' 'authorization: {}'\n\nURL: '{}{}'",
          date_header, authorization, manta_url, loc);
     println!();
 
-    // TODO find an HTTP(s) client library that works on SmartOS
-    let output = std::process::Command::new("curl")
-                                       .arg("-sS")
-                                       .arg("--header")
-                                       .arg(format!("{}", date_header))
-                                       .arg("--header")
-                                       .arg(format!("authorization: {}", authorization))
-                                       .arg(format!("{}{}", manta_url, loc))
-                                       .output()
-                                       .expect("failed to execute curl");
-    assert!(output.status.success());
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let files = stdout.trim().split("\n");
+    // TODO: factor this out this client and probably use a JSON deserializer
+    rt::run(rt::lazy(move || {
+        let https = HttpsConnector::new(4).expect("TLS init failed");
+        let client = Client::builder().build::<_, hyper::Body>(https);
 
-    // Parse each blob
-    for file in files {
-        let obj: Value = serde_json::from_str(file).expect("Failed to parse JSON");
-        let slash = if obj["type"] == "directory" { "/" } else { "" };
-        let name = obj["name"].as_str().expect("Failed to extract name");
-        println!("{}{}", name, slash);
+        let req = Request::builder()
+            .method(Method::GET)
+            .uri(format!("{}{}", manta_url, loc))
+            .header(AUTHORIZATION, authorization)
+            .header(DATE, date)
+            .body(hyper::Body::empty())
+            .unwrap();
+
+        client
+            .request(req)
+            .and_then(|res| {
+                res.into_body().concat2()
+            })
+            .and_then(|body| {
+                let output = String::from_utf8(body.to_vec()).expect("error").to_string();
+                let files = output.trim().split("\n");
+
+                // Parse each blob
+                for file in files {
+                    let obj: Value = serde_json::from_str(file).expect("Error parsing JSON");
+                    let slash = if obj["type"] == "directory" { "/" } else { "" };
+                    let name = obj["name"].as_str().expect("Failed to extract name");
+                    println!("{}{}", name, slash);
+                }
+                Ok(()) // Cheating?
+            })
+            .map_err(|err| {
+                println!("Error: {}", err)
+            })
+    }));
+}
+
+/*
+enum FetchError {
+    Http(hyper::Error),
+    Json(serde_json::Error),
+}
+
+impl From<hyper::Error> for FetchError {
+    fn from(err: hyper::Error) -> FetchError {
+        FetchError::Http(err)
     }
 }
+
+impl From<serde_json::Error> for FetchError {
+    fn from(err: serde_json::Error) -> FetchError {
+        FetchError::Json(err)
+    }
+}
+
+*/
