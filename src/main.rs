@@ -106,40 +106,22 @@ fn main() {
                 res.into_body().concat2()
             })
             .and_then(|body| {
-                let output = String::from_utf8(body.to_vec()).expect("error").to_string();
+                let output = String::from_utf8(body.to_vec())
+                    .expect("error").to_string();
                 let files = output.trim().split("\n");
 
                 // Parse each blob
                 for file in files {
-                    let obj: Value = serde_json::from_str(file).expect("Error parsing JSON");
+                    let obj: Value = serde_json::from_str(file)
+                        .expect("Error parsing JSON");
                     let slash = if obj["type"] == "directory" { "/" } else { "" };
                     let name = obj["name"].as_str().expect("Failed to extract name");
                     println!("{}{}", name, slash);
                 }
-                Ok(()) // Cheating?
+                Ok(())
             })
             .map_err(|err| {
                 println!("Error: {}", err)
             })
     }));
 }
-
-/*
-enum FetchError {
-    Http(hyper::Error),
-    Json(serde_json::Error),
-}
-
-impl From<hyper::Error> for FetchError {
-    fn from(err: hyper::Error) -> FetchError {
-        FetchError::Http(err)
-    }
-}
-
-impl From<serde_json::Error> for FetchError {
-    fn from(err: serde_json::Error) -> FetchError {
-        FetchError::Json(err)
-    }
-}
-
-*/
