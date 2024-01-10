@@ -1,6 +1,13 @@
 Rust Manta
 ==========
 
+# This branch is work-in-progress functionality is incomplete, interfaces are likely to change.
+
+# TODO
+- client has to be mutable because of the ssh auth socket, need a way to address this
+
+----
+
 Really simple manta logic in rust
 
 Example
