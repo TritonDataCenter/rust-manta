@@ -27,6 +27,12 @@ impl EntryCodec {
     }
 }
 
+impl Default for EntryCodec {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// An error occurred while encoding or decoding a chunk.
 #[derive(Debug)]
 pub enum EntryCodecError {
@@ -78,7 +84,7 @@ impl Decoder for EntryCodec {
                     let mut chunk = buf.split_to(new_chunk_index + 1);
                     chunk.truncate(chunk.len() - 1);
                     let chunk = chunk.freeze();
-                    return Ok(Some(serde_json::from_slice(&*chunk).unwrap()));
+                    return Ok(Some(serde_json::from_slice(&chunk).unwrap()));
                 }
                 (false, None) if buf.len() > self.max_buffer_length => {
                     // Reached the maximum length without finding a
@@ -109,7 +115,7 @@ impl Decoder for EntryCodec {
                     let chunk = buf.split_to(buf.len());
                     let chunk = chunk.freeze();
                     self.next_index = 0;
-                    return Ok(Some(serde_json::from_slice(&*chunk).unwrap()));
+                    return Ok(Some(serde_json::from_slice(&chunk).unwrap()));
                 }
             }
         })

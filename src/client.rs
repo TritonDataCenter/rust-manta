@@ -78,6 +78,41 @@ pub struct Config {
 }
 
 impl Config {
+    pub fn new(
+        user: Option<&str>,
+        key_id: Option<&str>,
+        manta_url: Option<&str>,
+    ) -> Config {
+        let account = if let Some(m_user) = user {
+            String::from(m_user)
+        } else {
+            env::var("MANTA_USER").unwrap_or_default()
+        };
+
+        let key = if let Some(m_key) = key_id {
+            String::from(m_key)
+        } else {
+            env::var("MANTA_KEY_ID").unwrap_or_default()
+        };
+
+        let url = if let Some(m_url) = manta_url {
+            String::from(m_url)
+        } else {
+            env::var("MANTA_URL")
+                .unwrap_or(String::from("https://us-central.manta.mnx.io"))
+        };
+
+        Self {
+            account,
+            user: None,
+            role: None,
+            insecure: false,
+            key,
+            ssh_auth_socket: env::var("SSH_AUTH_SOCK").unwrap_or_default(),
+            url,
+            log: None,
+        }
+    }
     pub fn new_from_defaults() -> Config {
         Self {
             account: env::var("MANTA_USER").unwrap_or_default(),
@@ -105,7 +140,7 @@ impl LogOptions {
             0 => LevelFilter::OFF,
             1 => LevelFilter::INFO,
             2 => LevelFilter::DEBUG,
-            3 | _ => LevelFilter::TRACE,
+            _ => LevelFilter::TRACE,
         };
         Self {
             level: log_level,
@@ -194,7 +229,7 @@ impl Client {
 
         let idx = identities
             .iter()
-            .position(|ref ident| {
+            .position(|ident| {
                 ident.md5_fp == config.key || ident.sha256_fp == config.key
             })
             .expect("Failed to find key in ssh-agent");

@@ -26,7 +26,7 @@ static RFC1123_FORMAT: &[FormatItem] = format_description!(
 static BASE64: B64Engine = B64Engine::new(&B64_STANDARD, B64_NO_PAD);
 
 fn read_string(buf: &[u8], offset: usize, len: usize) -> String {
-    let slice = &buf[offset..(offset + len) as usize];
+    let slice = &buf[offset..(offset + len)];
     String::from_utf8(slice.to_vec()).expect("Failed to read string")
 }
 
@@ -65,7 +65,7 @@ impl SshAgentClient {
     const SSH2_AGENT_SIGN_RESPONSE: u8 = 14;
 
     pub fn new(socket_path: &str) -> SshAgentClient {
-        let stream = UnixStream::connect(&socket_path)
+        let stream = UnixStream::connect(socket_path)
             .expect("failed to connect to socket");
 
         stream
@@ -209,7 +209,7 @@ impl SshAgentClient {
         idx += 4;
         let blob = &buf[idx..(idx + len)];
 
-        BASE64.encode(&blob)
+        BASE64.encode(blob)
     }
 }
 
@@ -260,7 +260,7 @@ impl SshIdentity {
 
         SshIdentity {
             raw_key: bytes.to_vec(),
-            key: BASE64.encode(&bytes),
+            key: BASE64.encode(bytes),
             key_type: t,
             comment: comment.to_string(),
             md5_fp,
@@ -281,16 +281,16 @@ impl fmt::Display for SshIdentity {
 
 fn sha256_fingerprint(bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(&bytes);
+    hasher.update(bytes);
 
     let sum = hasher.finalize();
 
-    format!("SHA256:{}", BASE64.encode(&sum))
+    format!("SHA256:{}", BASE64.encode(sum))
 }
 
 fn md5_fingerprint(bytes: &[u8]) -> String {
     let mut hasher = Md5::new();
-    hasher.update(&bytes);
+    hasher.update(bytes);
 
     let sum = hasher.finalize();
     let strs: Vec<String> = sum.iter().map(|b| format!("{:02x}", b)).collect();
